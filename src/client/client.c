@@ -5,7 +5,10 @@
 #include "common.h"
 
 int main(int argc, char** argv) {
-	printf("Client.\n");
-	info();
+	char* nickname;
+
+	nickname = get_nickname();
+	printf("Your nickname is: %s\n", nickname);
+
 	return EXIT_SUCCESS;
 }
