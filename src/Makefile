@@ -3,7 +3,7 @@ H_DEFS=common.h common_task.h
 O_DEFS=common.o common_task.o
 
 C_FLAGS=-Wall -Werror -pedantic -g
-L_FLAGS=
+L_FLAGS=-lrt -lpthread
 
 SERVER=server
 
@@ -30,4 +30,4 @@ common_task.o: common_task.c common_task.h
 # cleaning
 
 clean:
-	-rm ${TARGET} *.o
+	-rm ${SERVER} *.o
