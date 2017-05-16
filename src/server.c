@@ -1,137 +1,323 @@
-#define _GNU_SOURCE
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
-#include <errno.h>
-#include <stdint.h>
-#include <signal.h>
-#include <time.h>
-#include <fcntl.h>
-#include <pthread.h>
-
 #include "common.h"
 #include "common_task.h"
 
-#define ERR(source) (perror(source),\
-					fprintf(stderr, "%s: %d\n", __FILE__, __LINE__),\
-					exit(EXIT_FAILURE))
-					
-#define MAX_LINE 80
-#define MAX_NAME 32
-#define MAX_CLIENT 2
-
-struct client_info {
-	char nickname[MAX_NAME];
-	int results[MAX_CLIENT];
-	int score;
-	int id;
-};
-
 volatile sig_atomic_t do_work = 1;
-volatile sig_atomic_t client_id = -1;
 
-void remove_new_line(char* string) {
-	int i;
-	for(i = strlen(string) - 1; i >= 0; i--) {
-		if(string[i] == '\r' || string[i] == '\n')
-			string[i] = '\0';
-		else
-			break;
-	}
-}
-
-int get_client_id() {
-	return ++client_id;
-}
+void sigint_handler(int sig);
+void usage(char* name);
+void build_array(char* path);
+void print_ranking();
+void* user_input(void* arg);
+int find_index_for_client();
+void find_new_games();
+void init_game_for_player(game* this_game, client* player, client* opponent, pthread_mutex_t *mutex, pthread_cond_t *cond, int* winner, int* indexes);
+void* single_game(void* arg);
+void* handle_pair(void* arg);
+void client_init(int client_socket, client* cl);
+void* client_handler(void* arg);
+void do_server(int server_socket);
 
 void sigint_handler(int sig) {
 	do_work = 0;
 }
 
 void usage(char* name) {
-	fprintf(stderr, "USAGE: %s port file_name lines_cnt\n", name);
+	fprintf(stderr, "USAGE: %s port file_name\n", name);
 }
 
-int are_words_equal(char* pattern, char* input) {
-	int len_pattern = strlen(pattern);
-	int len_input = strlen(input);
+void build_array(char* path) {
+	char data[MAX_LINE];
+
+	FILE *fp;
+	int i = 0;
+
+	fp = fopen(path, "r");
+	if(fp == NULL)
+		EXIT("fopen");
+
+	while(fgets(data, sizeof(data), fp) != NULL && i < WORDS_CNT) {
+		sscanf(data, "%s", data);
+		remove_new_line(data);
+		strncpy(words[i], data, MAX_LINE);
+		i++;
+	}
+
+	fclose(fp);
+}
+
+void* user_input(void* arg) {
+	int stdin = STDIN_FILENO;
+	char buffer[1];
+	
+	fd_set base_rfds, rfds;
+	FD_ZERO(&base_rfds);
+	FD_SET(stdin, &base_rfds);
+	
+	while(1) {
+		printf("Wpisz 'R', by zobaczyć ranking.\n");
+		
+		rfds = base_rfds;
+		
+		if(select(stdin + 1, &rfds, NULL, NULL, NULL) > 0) {		
+			if(FD_ISSET(stdin, &rfds)) {
+				while(read(stdin, buffer, sizeof(buffer)) > 0) {
+					if(strcmp(buffer, "R") == 0) {
+						print_scoreboard();
+					}
+				}
+			}
+		}
+	}
+}
+
+int find_index_for_client() {
 	int i = 0;
 	
-	if(len_input != len_pattern)
-		return -1;
-	else {
-		for(; i < len_input; i++) {
-			if(pattern[i] != input[i])
-				return 0;
+	for(i = 0; i < MAX_CLIENTS; i++) {
+		if(clients[i] == NULL) {
+			return i;
 		}
 	}
 	
-	return 1;
+	return -1;
 }
 
-void communicate(int cfd, struct client_info* clients, char** random_words, int n) {
-	ssize_t size;
-	char nick[MAX_NAME];
-	char data_r[MAX_LINE];
-	char data_w[MAX_LINE];
+void find_new_games() {
+	int i = 0, j = 0;
+	
+	for(; i < MAX_CLIENTS; i++) {
+		if(clients[i] == NULL) continue;
 		
-	memset(data_w, 0, sizeof(char) * MAX_LINE);
-	memset(data_r, 0, sizeof(char) * MAX_LINE);
-	strcpy(data_w, "Nickname:\n");
+		// printf("----- [%d] Conn: %d # Idle: %d\n", 
+			// i, (int)clients[i]->connected, clients[i]->idle);
+		
+		// for(j = 0; j < MAX_CLIENTS; j++) {
+			// if(clients[j] != NULL && i != j) {
+				// printf("[%d -> %d]: %d\n", i, j, clients[i]->results[j]);
+				// printf("[%d -> %d]: %d\n", j, i, clients[j]->results[i]);
+			// }
+		// }
+		
+		for(j = 0; j < MAX_CLIENTS; j++) {
+			if(clients[j] != NULL &&
+			clients[i]->connected == 1 &&
+			clients[j]->connected == 1 &&
+			clients[j]->results[i] == NOT_PLAYED &&
+			clients[i]->idle == 1 &&
+			clients[j]->idle == 1) {
+				// let's start game between i and j;				
+				clients[i]->idle = clients[j]->idle = 0;
+				clients[i]->results[j] = PLAYING;
+				clients[j]->results[i] = PLAYING;
+				
+				pthread_t game_thread;
+				pair* new_pair = (pair*)malloc(sizeof(pair));
+				new_pair->client1 = clients[i];
+				new_pair->client2 = clients[j];
+				
+				printf("[S] Rozpoczęcie gry: [%s] <-> [%s]\n",
+				new_pair->client1->nickname,
+				new_pair->client2->nickname);
+				create_thread(&game_thread, NULL, handle_pair, new_pair);
+			}
+		}
+	}
+}
+
+void init_game_for_player(game* this_game, 
+		client* player, client* opponent, 
+		pthread_mutex_t *mutex, pthread_cond_t *cond,
+		int* winner, int* indexes) {
+	this_game->indexes = indexes;
+	this_game->winner = winner;
+	this_game->player = player;
+	this_game->opponent = opponent;
 	
-	if(bulk_write(cfd, data_w, MAX_LINE) < 0 && errno != EPIPE) ERR("write");
-	if((size = read(cfd, data_r, MAX_NAME)) < 0) ERR("read"); // read nickname
-	remove_new_line(data_r);
-	strcpy(nick, data_r);
-	printf("[%s] connected.", nick);
-	fflush(stdout);
-	
+	this_game->mutex = mutex;
+	this_game->cond = cond;
+}
+
+void* single_game(void* arg) {
+	game* this_game = (game*)arg;
+	int* indexes = this_game->indexes;
+	char buffer[MAX_LINE];
 	int i = 0;
 	
-	for(; i < n; i++) {
-		if(bulk_write(cfd, random_words[i], MAX_LINE) < 0 && errno != EPIPE) ERR("write");
-		if(bulk_write(cfd, "\n", sizeof(char)) < 0 && errno != EPIPE) ERR("write");
+	snprintf(buffer, MAX_LINE, "[K] Obecnie grasz z: [%s].\n",
+		this_game->opponent->nickname);
+	socket_write(this_game->player->fd, buffer, MAX_LINE);
+	
+	while(i < WORDS_GAME) {	
+		memset(buffer, 0, sizeof(buffer));
 		
-		memset(data_r, 0, sizeof(char) * MAX_LINE);
-		if((size = read(cfd, data_r, MAX_LINE)) < 0) ERR("read");
-		remove_new_line(data_r);
+		socket_write(this_game->player->fd, words[indexes[i]], MAX_LINE);
+		socket_write(this_game->player->fd, " ", 1); // for clarity;
+		int read = socket_read(this_game->player->fd, buffer, MAX_LINE);
+
+		if(read == -1) {
+			clients[this_game->player->id] = NULL;
+			
+			for(i = 0; i < MAX_CLIENTS; i++) {
+				if(clients[i] != NULL) {
+					clients[i]->results[this_game->player->id] = EMPTY;
+				}
+			}
+			
+			pthread_cancel(this_game->opponent_thread);
+			this_game->opponent->idle = 1;
+			
+			find_new_games();
+		}
 		
-		if(strcmp(random_words[i], data_r) == 0)
-			printf("Success: %s\n", data_r);
+		remove_new_line(buffer);
+		if(are_words_equal(words[indexes[i]], buffer)) {
+			i++;
+		}
 	}
 	
-	// strncpy(clients[client_id].nickname, nickname, MAX_NAME);
-	// clients[client_id].id = get_client_id();
-		
-	if(TEMP_FAILURE_RETRY(close(cfd)) < 0) ERR("close");
+	mutex_lock(this_game->mutex);
+	cond_signal(this_game->cond);
+	*(this_game->winner) = this_game->player->id;
+	mutex_unlock(this_game->mutex);
+
+	return arg;
 }
 
-void do_server(int fdt, char** words, int words_cnt, struct client_info* clients) {
-	int cfd;
-	char** random_words;
+void* handle_pair(void* arg) {
+	int winner = -1;
+	pair* this_pair = (pair*)arg;
+	client* cl1 = this_pair->client1;
+	client* cl2 = this_pair->client2;
+	game this_game[2];
+	pthread_t threads[2];
+	
+	char buffer[MAX_LINE];
+	
+	pthread_mutex_t mutex;
+	pthread_cond_t cond;
+	mutex_init(&mutex, NULL);
+	cond_init(&cond, NULL);
+	
+	int* indexes = (int*)malloc(sizeof(int) * WORDS_GAME);
+	find_indexes(indexes, WORDS_GAME, WORDS_CNT);
+	
+	init_game_for_player(&this_game[0], cl1, cl2, &mutex, &cond, &winner, indexes);
+	init_game_for_player(&this_game[1], cl2, cl1, &mutex, &cond, &winner, indexes);
+	
+	create_thread(&threads[0], NULL, single_game, &this_game[0]);
+	create_thread(&threads[1], NULL, single_game, &this_game[1]);
+	this_game[0].player_thread = threads[0];
+	this_game[1].player_thread = threads[1];
+	this_game[0].opponent_thread = threads[1];
+	this_game[1].opponent_thread = threads[0];
+	
+	pthread_cond_wait(&cond, &mutex);
+	
+	if(winner == cl1->id) {
+		pthread_cancel(threads[1]);
+		
+		sprintf(buffer, "[K] [Przegrana] Wygrał gracz: [%s].\n", cl1->nickname);
+		socket_write(cl2->fd, buffer, MAX_LINE);
+		memset(buffer, 0, sizeof(buffer));
+		sprintf(buffer, "[K] [Wygrana] Wygrałeś z: [%s].\n", cl2->nickname);
+		socket_write(cl1->fd, buffer, MAX_LINE);
+		
+		clients[cl1->id]->results[cl2->id] = WON;
+		clients[cl2->id]->results[cl1->id] = LOST;
+		this_pair->client1->score++;
+	} else if(winner == cl2->id) {
+		pthread_cancel(threads[0]);
+		
+		sprintf(buffer, "[K] [Przegrana] Wygrał gracz: [%s].\n", cl2->nickname);
+		socket_write(cl1->fd, buffer, MAX_LINE);
+		memset(buffer, 0, sizeof(buffer));
+		sprintf(buffer, "[K] [Wygrana] Wygrałeś z: [%s].\n", cl1->nickname);
+		socket_write(cl2->fd, buffer, MAX_LINE);
+		
+		clients[cl2->id]->results[cl1->id] = WON;
+		clients[cl1->id]->results[cl2->id] = LOST;
+		this_pair->client2->score++;
+	}
+	
+	clients[this_pair->client1->id]->idle = 1;
+	clients[this_pair->client2->id]->idle = 1;
+	
+	free(indexes);
+	
+	send_scoreboard_to_clients(this_game);
+	find_new_games();
+	pthread_exit((void*)arg);
+}
+
+void client_init(int client_socket, client* cl) {
+	int i = 0;
+	int index = find_index_for_client();
+	
+	clients[index] = cl;
+
+	get_client_nickname(client_socket, cl->nickname);
+	cl->id = index;
+	cl->fd = client_socket;
+	cl->score = 0;
+	cl->idle = 1;
+	cl->connected = 1;
+	
+	for(i = 0; i < MAX_CLIENTS; i++) {
+		cl->results[i] = EMPTY;
+	}
+	
+	for(i = 0; i < MAX_CLIENTS; i++) {
+		if(i == index) continue;
+			
+		if(clients[i] != NULL) {
+			cl->results[i] = NOT_PLAYED;
+			clients[i]->results[index] = NOT_PLAYED;
+		}
+	}
+}
+
+void* client_handler(void* arg) {
+	int client_socket = *((int*)arg);
+	client* cl = (client*)malloc(sizeof(client));
+	client_init(client_socket, cl);
+	
+	printf("[K] (%d): [%s] Klient połączył się.\n", cl->id, cl->nickname);
+	
+	find_new_games();
+	
+	pthread_exit((void*)arg);
+}
+
+void do_server(int server_socket) {
+	int client_socket;
+	
 	fd_set base_rfds, rfds;
 	sigset_t mask, oldmask;
 	
 	FD_ZERO(&base_rfds);
-	FD_SET(fdt, &base_rfds);
+	FD_SET(server_socket, &base_rfds);
 	
 	sigemptyset(&mask);
 	sigaddset(&mask, SIGINT);
 	sigprocmask(SIG_BLOCK, &mask, &oldmask);
 	
+	pthread_t user_input_thread;
+	create_thread(&user_input_thread, NULL, user_input, NULL);
+	
 	while(do_work) {
 		rfds = base_rfds;
 		
-		random_words = get_random_words(words, words_cnt, 5);
-		
-		if(pselect(fdt + 1, &rfds, NULL, NULL, NULL, &oldmask) > 0) {
-			if(FD_ISSET(fdt, &rfds)) cfd = add_new_client(fdt);
-			if(cfd >= 0) communicate(cfd, clients, random_words, 5);
-		} else {
-			if(EINTR == errno) continue;
-			ERR("pselect");
+		if(pselect(server_socket + 1, &rfds, 
+				NULL, NULL, NULL, &oldmask) > 0) {		
+			if(FD_ISSET(server_socket, &rfds)) {
+				if((client_socket = accept_client(server_socket)) < 0) {
+					if(errno == EINTR) continue;
+					EXIT("accept");
+				} else {
+					pthread_t client_thread;
+					create_thread(&client_thread, NULL, client_handler, &client_socket);
+				}
+			}
 		}
 	}
 	
@@ -139,43 +325,29 @@ void do_server(int fdt, char** words, int words_cnt, struct client_info* clients
 }
 
 int main(int argc, char** argv) {
-	int fdt, i = 0;
-	int new_flags;
+	int server_socket;
+	uint16_t port;
 	
-	char* filename;
-	char** words;
-	int words_cnt;
-	
-	if(argc != 4) {
+	if(!parse_arguments(argc, argv, &port)) {
 		usage(argv[0]);
-		return EXIT_FAILURE;
+		exit(EXIT_FAILURE);
+	} else {
+		build_array(argv[2]);
 	}
+
+	set_handler(SIG_IGN, SIGPIPE);
+	set_handler(sigint_handler, SIGINT);
+
+	server_socket = bind_inet_socket(port, SOCK_STREAM);
+	set_nonblock(server_socket);
 	
-	if(sethandler(SIG_IGN, SIGPIPE)) ERR("Setting SIGPIPE");
-	if(sethandler(sigint_handler, SIGINT)) ERR("Setting SIGINT");
+	info(port);
+	do_server(server_socket);
 	
-	struct client_info clients[MAX_CLIENT];
+	safe_close(server_socket);
 	
-	fdt = bind_tcp_socket(atoi(argv[1]));
-	
-	new_flags = fcntl(fdt, F_GETFL) | O_NONBLOCK;
-	fcntl(fdt, F_SETFL, new_flags);
-	
-	filename = argv[2];
-	words_cnt = atoi(argv[3]);
-	words = build_array(filename, words_cnt);
-	
-	info();
-	do_server(fdt, words, words_cnt, clients);
-	
-	for(i = 0; i < words_cnt; i++) {
-		free(words[i]);
-	}
-	
-	free(words);
-	
-	if(TEMP_FAILURE_RETRY(close(fdt)) < 0) ERR("close");
-	fprintf(stderr, "Server has terminated.\n");
-	
+	author();
+	fprintf(stderr, "[S] Serwer zakończył działanie.\n");
+
 	return EXIT_SUCCESS;
 }

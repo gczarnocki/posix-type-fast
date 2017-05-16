@@ -3,17 +3,12 @@ SRC_DIR=src
 
 .PHONY: all clean
 
-all: client server
-	cp ${SRC_DIR}/client/client ${BIN_DIR}/
-	cp ${SRC_DIR}/server/server ${BIN_DIR}/
-
-client:
-	make -C ${SRC_DIR}/client
+all: server
+	cp ${SRC_DIR}/server ${BIN_DIR}/
 
 server:
-	make -C ${SRC_DIR}/server
+	make all -C ${SRC_DIR}
 
 clean:
-	make clean -C ${SRC_DIR}/client
-	make clean -C ${SRC_DIR}/server
-	-rm ${BIN_DIR}/client ${BIN_DIR}/server
+	make clean -C ${SRC_DIR}
+	rm ${BIN_DIR}/server
