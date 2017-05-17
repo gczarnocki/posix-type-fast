@@ -6,16 +6,10 @@ volatile sig_atomic_t do_work = 1;
 void sigint_handler(int sig);
 void usage(char* name);
 void build_array(char* path);
-void print_ranking();
 void* user_input(void* arg);
-int find_index_for_client();
 void find_new_games();
-void init_game_for_player(game* this_game, client* player, 
-	client* opponent, pthread_mutex_t *mutex, pthread_cond_t *cond,
-	int* winner, int* indexes);
 void* single_game(void* arg);
 void* handle_pair(void* arg);
-void client_init(int client_socket, client* cl);
 void* client_handler(void* arg);
 void do_server(int server_socket);
 
@@ -72,18 +66,6 @@ void* user_input(void* arg) {
 	}
 }
 
-int find_index_for_client() {
-	int i = 0;
-	
-	for(i = 0; i < MAX_CLIENTS; i++) {
-		if(clients[i] == NULL) {
-			return i;
-		}
-	}
-	
-	return -1;
-}
-
 void find_new_games() {
 	int i = 0, j = 0;
 	
@@ -118,58 +100,13 @@ void find_new_games() {
 	}
 }
 
-void init_game_for_player(game* this_game, 
-		client* player, client* opponent, 
-		pthread_mutex_t *mutex, pthread_cond_t *cond,
-		int* winner, int* indexes) {
-	this_game->indexes = indexes;
-	this_game->winner = winner;
-	this_game->player = player;
-	this_game->opponent = opponent;
-	
-	this_game->mutex = mutex;
-	this_game->cond = cond;
-}
-
-void print_to_socket(int fd, char* text) {
-	int len = strlen(text) + 1;
-	socket_write(fd, text, len);
-}
-
-void handle_disconnected_client(game* this_game) {
-	// this_game->player disconnected;
-	
-	int i = 0;
-	int id = this_game->player->id;
-	
-	char buffer[MAX_LINE];
-	snprintf(buffer, MAX_LINE, 
-		"# Klient [%s] odłączył się - wygrana!\n", 
-		this_game->player->nickname);
-	
-	print_to_socket(this_game->opponent->fd, buffer);
-	printf("%s", buffer);
-	
-	clients[id] = NULL;
-	
-	for(i = 0; i < MAX_CLIENTS; i++) {
-		if(clients[i] != NULL) {
-			clients[i]->results[id] = EMPTY;
-		}
-	}
-					
-	pthread_cancel(this_game->opponent_thread);
-	this_game->opponent->idle = 1;
-	this_game->opponent->score++;
-	
-	send_scoreboard_client(this_game->opponent);
-}
-
 void* single_game(void* arg) {
 	game* this_game = (game*)arg;
 	int* indexes = this_game->indexes;
 	char buffer[MAX_LINE];
-	int i = 0, timeouted = 1;
+	
+	int i = 0, timed_out = 1;
+	int retry_cnt = 0, disconnected = 0;
 	
 	int fd = this_game->player->fd;
 	int id = this_game->player->id;
@@ -178,17 +115,17 @@ void* single_game(void* arg) {
 	timeout.tv_sec = TIMEOUT_SECS;
 	timeout.tv_nsec = 0;
 	
-	fd_set base_rfds, rfds;
-	FD_ZERO(&base_rfds);
-	FD_SET(fd, &base_rfds);
+	fd_set base_wfds, wfds;
+	FD_ZERO(&base_wfds);
+	FD_SET(fd, &base_wfds);
 	
 	snprintf(buffer, MAX_LINE, "# Obecnie grasz z: [%s].\n",
 		this_game->opponent->nickname);
 	socket_write(fd, buffer, MAX_LINE);
 	
 	while(i < WORDS_GAME) {	
-		rfds = base_rfds;
-		timeouted = 1;
+		wfds = base_wfds;
+		timed_out = 1;
 		
 		memset(buffer, 0, sizeof(buffer));
 		snprintf(
@@ -196,30 +133,43 @@ void* single_game(void* arg) {
 			i + 1, WORDS_GAME, words[indexes[i]]);
 		socket_write(fd, buffer, MAX_LINE);
 		
-		if(pselect(fd + 1, &rfds, NULL, NULL, &timeout, NULL) > 0) {
-			timeouted = 0;
+		if(pselect(fd + 1, NULL, &wfds, NULL, &timeout, NULL) > 0) {
+			timed_out = 0;
 			
-			if(FD_ISSET(fd, &rfds)) {
+			if(FD_ISSET(fd, &wfds)) {
 				memset(buffer, 0, sizeof(buffer));
 				int read = socket_read(fd, buffer, MAX_LINE);
 
 				if(read == -1) {
 					// client disconnected;
-					handle_disconnected_client(this_game);
-					find_new_games();
-					return arg;
-				}
-				
-				remove_new_line(buffer);
-				if(are_words_equal(words[indexes[i]], buffer)) {
-					i++;
+					disconnected = 1;
+				} else {
+					remove_new_line(buffer);
+					if(are_words_equal(words[indexes[i]], buffer)) {
+						i++;
+					} 
 				}
 			}
 		}
 		
-		if(timeouted) {
+		if(timed_out) {
 			strncpy(buffer, "\n# Hej, jesteś tam?\n", MAX_LINE);
 			socket_write(fd, buffer, MAX_LINE);
+			
+			retry_cnt++;
+			printf("# Ponowienie połączenia [%d/%d]: [%s]\n", 
+				retry_cnt, MAX_RETRY_CNT,
+				this_game->player->nickname);
+				
+			if(retry_cnt == MAX_RETRY_CNT) {
+				disconnected = 1;
+			}
+		}
+				
+		if(disconnected) {
+			handle_disconnected_client(this_game);
+			find_new_games();
+			return arg;
 		}
 	}
 	
@@ -229,23 +179,6 @@ void* single_game(void* arg) {
 	mutex_unlock(this_game->mutex);
 
 	return arg;
-}
-
-void handle_finished_game(client* winner, client* loser) {
-	char buffer[MAX_LINE];
-	memset(buffer, 0, MAX_LINE);
-	
-	sprintf(buffer, 
-		"# [Przegrana] Wygrał gracz: [%s].\n", winner->nickname);
-	socket_write(loser->fd, buffer, MAX_LINE);
-	memset(buffer, 0, sizeof(buffer));
-	sprintf(buffer, 
-		"# [Wygrana] Wygrałeś z: [%s].\n", loser->nickname);
-	socket_write(winner->fd, buffer, MAX_LINE);
-		
-	clients[winner->id]->results[loser->id] = WON;
-	clients[loser->id]->results[winner->id] = LOST;
-	winner->score++;
 }
 
 void* handle_pair(void* arg) {
@@ -294,33 +227,6 @@ void* handle_pair(void* arg) {
 	send_scoreboard_game(this_game);
 	find_new_games();
 	pthread_exit((void*)arg);
-}
-
-void client_init(int client_socket, client* cl) {
-	int i = 0;
-	int index = find_index_for_client();
-	
-	clients[index] = cl;
-
-	get_client_nickname(client_socket, cl->nickname);
-	cl->id = index;
-	cl->fd = client_socket;
-	cl->score = 0;
-	cl->idle = 1;
-	cl->connected = 1;
-	
-	for(i = 0; i < MAX_CLIENTS; i++) {
-		cl->results[i] = EMPTY;
-	}
-	
-	for(i = 0; i < MAX_CLIENTS; i++) {
-		if(i == index) continue;
-			
-		if(clients[i] != NULL) {
-			cl->results[i] = NOT_PLAYED;
-			clients[i]->results[index] = NOT_PLAYED;
-		}
-	}
 }
 
 void* client_handler(void* arg) {

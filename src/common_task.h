@@ -16,6 +16,7 @@
 #define WORDS_CNT 40
 #define MAX_CLIENTS 10
 #define TIMEOUT_SECS 10
+#define MAX_RETRY_CNT 3
 
 typedef enum result { EMPTY = 0, NOT_PLAYED, PLAYING, WON, LOST } result;
 
@@ -65,6 +66,16 @@ void get_scoreboard(char* buffer, int id);
 void send_scoreboard_client(client* player);
 void send_scoreboard_game(game* this_game);
 
+void client_init(int client_socket, client* cl);
+int find_index_for_client();
 int connected_clients_count();
+void handle_disconnected_client(game* this_game);
+void init_game_for_player(game* this_game, 
+		client* player, client* opponent, 
+		pthread_mutex_t *mutex, pthread_cond_t *cond,
+		int* winner, int* indexes);
+void handle_finished_game(client* winner, client* loser);
+
+void find_new_games();
 
 #endif
