@@ -1,5 +1,7 @@
 #include "common_task.h"
 
+/* common */
+
 void info(int16_t port) {
 	printf("------- Witaj w grze 'Wyścig szczurów'. --------\n");
 	printf("- Przepisuj słowa szybciej, niż inni i wygraj! -\n");
@@ -7,10 +9,13 @@ void info(int16_t port) {
 }
 
 void author(void) {
-	printf("Stworzone przez: Grzegorz Czarnocki\n");
-	printf("Politechnika Warszawska, wydz. MiNI\n");
-	printf("--- Warszawa | maj 2017 r. (c) ----\n");
+	printf("\n");
+	printf("---- Stworzone przez: Grzegorz Czarnocki ----\n");
+	printf("---- Politechnika Warszawska, wydz. MiNI ----\n");
+	printf("--------- Warszawa | maj 2017 r. (c) --------\n");
 }
+
+/* helpers */
 
 void remove_new_line(char* str) {
 	int i;
@@ -39,6 +44,8 @@ int are_words_equal(char* pattern, char* input) {
 
 	return 1;
 }
+
+/* words */
 
 int parse_arguments(int argc, char** argv, uint16_t* port) {
 	if(argc != 3) {
@@ -77,6 +84,8 @@ void find_indexes(int* indexes, int array_size, int max_range) {
 	}
 }
 
+/* nickname */
+
 int if_nickname_exists(char* name) {
 	int i = 0;
 	
@@ -114,30 +123,37 @@ void get_client_nickname(int client_socket, char* nickname) {
 	}
 }
 
-void print_scoreboard() {
+/* scoreboard */
+
+void print_scoreboard(int id) {
 	int scoreboard_size = MAX_LINE * MAX_CLIENTS * sizeof(char);
 	char* scoreboard = (char*)malloc(scoreboard_size);
-	get_scoreboard(scoreboard);
+	get_scoreboard(scoreboard, id);
 	printf("%s", scoreboard);
 	free(scoreboard);
 }
 
-void get_scoreboard(char* buffer) {
+void get_scoreboard(char* buffer, int id) {
+	int len = strlen(buffer) + 1;
+	memset(buffer, 0, len);
+	char indicator[] = "[*]";
+	
 	int i = 0;
 	char tmp[MAX_LINE];
 	
 	int cnt = connected_clients_count();
 	
 	if(cnt > 0) {
-		strncpy(tmp, "### Ranking ###\n", MAX_LINE);
+		strncpy(tmp, "# Ranking #\n", MAX_LINE);
 		strcat(buffer, tmp);
 	
 		for(; i < MAX_CLIENTS; i++) {
 			if(clients[i] != NULL && clients[i]->connected == 1) {
-				snprintf(tmp, MAX_LINE, "[%d: %s] %d pts\n",
+				snprintf(tmp, MAX_LINE, "[%d: %s] %d pts %s\n",
 					clients[i]->id,
 					clients[i]->nickname,
-					clients[i]->score);
+					clients[i]->score,
+					i == id ? indicator : "");
 					
 				strcat(buffer, tmp);
 			}
@@ -147,15 +163,21 @@ void get_scoreboard(char* buffer) {
 	}
 }
 
-void send_scoreboard_to_clients(game* this_game) {	
+void send_scoreboard_client(client* player) {
 	int scoreboard_size = MAX_LINE * MAX_CLIENTS * sizeof(char);
 	char* scoreboard = (char*)malloc(scoreboard_size);
 	
-	get_scoreboard(scoreboard);
-	socket_write(this_game->player->fd, scoreboard, scoreboard_size);
-	socket_write(this_game->opponent->fd, scoreboard, scoreboard_size);
+	get_scoreboard(scoreboard, player->id);
+	socket_write(player->fd, scoreboard, scoreboard_size);
 	free(scoreboard);
 }
+
+void send_scoreboard_game(game* this_game) {
+	send_scoreboard_client(this_game->player);
+	send_scoreboard_client(this_game->opponent);
+}
+
+/* clients */
 
 int connected_clients_count() {
 	int i = 0, cnt = 0;

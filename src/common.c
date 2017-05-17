@@ -128,7 +128,8 @@ int bind_inet_socket(uint16_t port, int type) {
 
 int accept_client(int socket_fd) {
 	int client_fd;
-	if((client_fd = TEMP_FAILURE_RETRY(accept(socket_fd, NULL, NULL))) < 0) {
+	if((client_fd = TEMP_FAILURE_RETRY(
+			accept(socket_fd, NULL, NULL))) < 0) {
 	    if(EAGAIN == errno || EWOULDBLOCK == errno) {
 			return -1;
 		}
@@ -138,7 +139,6 @@ int accept_client(int socket_fd) {
 	return client_fd;
 }
 
-// TODO: do zmiany.
 ssize_t socket_read(int fd, char* buf, size_t count) {
 	int c;
 	// size_t len;
@@ -181,13 +181,15 @@ ssize_t socket_write(int fd, char* buf, size_t count) {
 
 /* Threads */
 
-void create_thread(pthread_t *thread, const pthread_attr_t *attr, void* (*handler)(void*), void *arg) {
+void create_thread(pthread_t *thread, const pthread_attr_t *attr, 
+		void* (*handler)(void*), void *arg) {
 	if(pthread_create(thread, attr, handler, arg) < 0) {
 		EXIT("pthread_create");
 	}
 }
 
-void create_detached_thread(pthread_t *thread, void* (*handler)(void*), void *arg) {
+void create_detached_thread(pthread_t *thread, 
+		void* (*handler)(void*), void *arg) {
 	pthread_attr_t attr;
 			
 	if(pthread_attr_init(&attr) != 0) {

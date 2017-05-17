@@ -30,4 +30,4 @@ common_task.o: common_task.c common_task.h
 # cleaning
 
 clean:
-	-rm ${SERVER} *.o
+	-rm ${SERVER} *.o *.h.gch common common_task
