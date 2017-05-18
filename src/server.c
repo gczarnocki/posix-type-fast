@@ -11,7 +11,7 @@ void find_new_games();
 void* single_game(void* arg);
 void* handle_pair(void* arg);
 void* client_handler(void* arg);
-void do_server(int server_socket);
+void do_server(int server_socket, int16_t port);
 
 void sigint_handler(int sig) {
 	do_work = 0;
@@ -39,31 +39,6 @@ void build_array(char* path) {
 	}
 
 	fclose(fp);
-}
-
-void* user_input(void* arg) {
-	int stdin = STDIN_FILENO;
-	char buffer[1];
-	
-	fd_set base_rfds, rfds;
-	FD_ZERO(&base_rfds);
-	FD_SET(stdin, &base_rfds);
-	
-	while(1) {
-		printf("# Wpisz 'R', by zobaczyć ranking.\n");
-		
-		rfds = base_rfds;
-		
-		if(select(stdin + 1, &rfds, NULL, NULL, NULL) > 0) {		
-			if(FD_ISSET(stdin, &rfds)) {
-				while(read(stdin, buffer, sizeof(buffer)) > 0) {
-					if(strcmp(buffer, "R") == 0) {
-						print_scoreboard(-1);
-					}
-				}
-			}
-		}
-	}
 }
 
 void find_new_games() {
@@ -242,7 +217,7 @@ void* client_handler(void* arg) {
 	pthread_exit((void*)arg);
 }
 
-void do_server(int server_socket) {
+void do_server(int server_socket, int16_t port) {
 	int client_socket;
 	
 	fd_set base_rfds, rfds;
@@ -256,7 +231,7 @@ void do_server(int server_socket) {
 	sigprocmask(SIG_BLOCK, &mask, &oldmask);
 	
 	pthread_t user_input_thread;
-	create_thread(&user_input_thread, NULL, user_input, NULL);
+	create_thread(&user_input_thread, NULL, user_input, (void*)&port);
 	
 	while(do_work) {
 		rfds = base_rfds;
@@ -297,11 +272,10 @@ int main(int argc, char** argv) {
 	set_nonblock(server_socket);
 	
 	info(port);
-	do_server(server_socket);
+	do_server(server_socket, port);
 	
 	safe_close(server_socket);
 	
-	author();
 	fprintf(stderr, "# Serwer zakończył działanie.\n");
 
 	return EXIT_SUCCESS;

@@ -49,9 +49,6 @@ typedef struct game {
 char words[WORDS_CNT][MAX_LINE]; 	// global array with game words;
 client* clients[MAX_CLIENTS]; 		// global array with client info;
 
-void info(int16_t port);
-void author(void);
-
 void remove_new_line(char* str);
 int are_words_equal(char* pattern, char* input);
 
@@ -62,6 +59,7 @@ int if_nickname_exists(char* name);
 void get_client_nickname(int client_socket, char* nickname);
 
 void print_scoreboard(int id);
+void print_detailed_scoreboard();
 void get_scoreboard(char* buffer, int id);
 void send_scoreboard_client(client* player);
 void send_scoreboard_game(game* this_game);
@@ -77,5 +75,10 @@ void init_game_for_player(game* this_game,
 void handle_finished_game(client* winner, client* loser);
 
 void find_new_games();
+
+void info(int16_t port);
+void author(void);
+void menu();
+void* user_input(void* arg);
 
 #endif

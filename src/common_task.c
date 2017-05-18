@@ -1,20 +1,5 @@
 #include "common_task.h"
 
-/* common */
-
-void info(int16_t port) {
-	printf("------- Witaj w grze 'Wyścig szczurów'. --------\n");
-	printf("- Przepisuj słowa szybciej, niż inni i wygraj! -\n");
-	printf("------- Aby grać, użyj telnetu. Port: %d -----\n", port);
-}
-
-void author(void) {
-	printf("\n");
-	printf("---- Stworzone przez: Grzegorz Czarnocki ----\n");
-	printf("---- Politechnika Warszawska, wydz. MiNI ----\n");
-	printf("--------- Warszawa | maj 2017 r. (c) --------\n");
-}
-
 /* helpers */
 
 void remove_new_line(char* str) {
@@ -133,6 +118,60 @@ void print_scoreboard(int id) {
 	free(scoreboard);
 }
 
+void print_game_result(int client_id, int opponent_id) {
+	int res = clients[client_id]->results[opponent_id];
+	char* nickname = clients[opponent_id]->nickname;
+	
+	char res_value[MAX_LINE];
+	
+	switch(res) {
+		case 1:
+			strncpy(res_value, "Przed grą", MAX_LINE);
+			break;
+		case 2:
+			strncpy(res_value, "W trakcie gry", MAX_LINE);
+			break;
+		case 3:
+			strncpy(res_value, "Wygrana", MAX_LINE);
+			break;
+		case 4:
+			strncpy(res_value, "Przegrana", MAX_LINE);	
+			break;
+	}
+	
+	printf("\t-> [%s]: %s\n", nickname, res_value);
+}
+
+void print_detailed_scoreboard() {
+	int i = 0, j = 0;
+	int cnt = connected_clients_count();
+	
+	if(cnt == 0) {
+		printf("Brak podłączonych klientów.\n");
+		return;
+	}
+	
+	printf("# Ranking+ #\n");
+	
+	for(i = 0; i < MAX_CLIENTS; i++) {
+		if(clients[i] == NULL) continue;
+		
+		printf("- [Id: %d] [%s] [Wynik: %d pkt.]\n", 
+			clients[i]->id, 
+			clients[i]->nickname,
+			clients[i]->score);
+		printf("Połączony: [%d] | Wolny: [%d]\n",
+			clients[i]->connected,
+			clients[i]->idle);
+			
+		for(j = 0; j < MAX_CLIENTS; j++) {
+			if(clients[j] == NULL || i == j) continue;
+			
+			print_game_result(i, j);
+		}
+	}
+}
+
 void get_scoreboard(char* buffer, int id) {
 	int len = strlen(buffer) + 1;
 	memset(buffer, 0, len);
@@ -150,7 +189,8 @@ void get_scoreboard(char* buffer, int id) {
 	
 		for(; i < MAX_CLIENTS; i++) {
 			if(clients[i] != NULL && clients[i]->connected == 1) {
-				snprintf(tmp, MAX_LINE, "[%d: %s] %d pts %s\n",
+				snprintf(tmp, MAX_LINE, 
+					"[Id: %d] [%s] [Wynik: %d pkt.] %s\n",
 					clients[i]->id,
 					clients[i]->nickname,
 					clients[i]->score,
@@ -290,4 +330,62 @@ void handle_finished_game(client* winner, client* loser) {
 	clients[winner->id]->results[loser->id] = WON;
 	clients[loser->id]->results[winner->id] = LOST;
 	winner->score++;
+}
+
+/* others */
+
+void info(int16_t port) {
+	printf("------- Witaj w grze 'Wyścig szczurów'. --------\n");
+	printf("- Przepisuj słowa szybciej, niż inni i wygraj! -\n");
+	printf("------- Aby grać, użyj telnetu. Port: %d -----\n", port);
+}
+
+void author(void) {
+	printf("--------- Autor: Grzegorz Czarnocki ---------\n");
+	printf("---- Politechnika Warszawska, wydz. MiNI ----\n");
+	printf("--------- Warszawa | maj 2017 r. (c) --------\n");
+}
+
+void menu() {
+	printf("# Menu:\n");
+	printf("A) O autorze\n");
+	printf("I) Informacje\n");
+	printf("M) Menu\n");
+	printf("R) Ranking\n");
+	printf("S) Ranking+\n");
+}
+
+void* user_input(void* arg) {
+	int stdin = STDIN_FILENO;
+	char buffer[1];
+	
+	fd_set base_rfds, rfds;
+	FD_ZERO(&base_rfds);
+	FD_SET(stdin, &base_rfds);
+
+	int16_t port = *((int16_t*)arg);
+	
+	menu();
+	
+	while(1) {
+		rfds = base_rfds;
+		
+		if(select(stdin + 1, &rfds, NULL, NULL, NULL) > 0) {		
+			if(FD_ISSET(stdin, &rfds)) {
+				while(read(stdin, buffer, sizeof(buffer)) > 0) {
+					if(strcmp(buffer, "A") == 0) {
+						author();
+					} else if(strcmp(buffer, "I") == 0) {
+						info(port);
+					} else if(strcmp(buffer, "M") == 0) {
+						menu();
+					} else if(strcmp(buffer, "R") == 0) {
+						print_scoreboard(-1);
+					} else if(strcmp(buffer, "S") == 0) {
+						print_detailed_scoreboard();
+					}
+				}
+			}
+		}
+	}
 }
