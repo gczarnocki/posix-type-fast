@@ -101,7 +101,7 @@ void get_client_nickname(int client_socket, char* nickname) {
 		}
 		
 		if(!if_nickname_exists(data)) {
-		// wychodzimy z pętli, jeśli nazwa nie jest używana;
+		// leave loop if name is not currently used;
 			do_work = 0;
 			strncpy(nickname, data, MAX_LINE);
 		}
@@ -119,6 +119,9 @@ void print_scoreboard(int id) {
 }
 
 void print_game_result(int client_id, int opponent_id) {
+	// game results are stored in clients structures, e.g.:
+	// result of i and j game is: clients[i]->results[j].
+	
 	int res = clients[client_id]->results[opponent_id];
 	char* nickname = clients[opponent_id]->nickname;
 	
@@ -143,6 +146,8 @@ void print_game_result(int client_id, int opponent_id) {
 }
 
 void print_detailed_scoreboard() {
+	// prints additional information about game results.
+	
 	int i = 0, j = 0;
 	int cnt = connected_clients_count();
 	
@@ -213,9 +218,42 @@ void send_scoreboard_client(client* player) {
 	free(scoreboard);
 }
 
-void send_scoreboard_game(game* this_game) {
-	send_scoreboard_client(this_game->player);
-	send_scoreboard_client(this_game->opponent);
+void send_scoreboard_client_game(client_game* this_client_game) {
+	send_scoreboard_client(this_client_game->player);
+	send_scoreboard_client(this_client_game->opponent);
+}
+
+/* words */
+
+void send_word_to_client(int fd, char* word, int i) {
+	char buffer[MAX_LINE];
+	memset(buffer, 0, sizeof(buffer));
+	
+	snprintf(buffer, MAX_LINE, "# [%d/%d] %s: ", i + 1, WORDS_GAME, word);
+	socket_write(fd, buffer, MAX_LINE);
+}
+
+int recv_word_from_client(int fd, char* word) {
+	// returns > 0 if client successfully rewritten a single word or
+	// -1, if client disconnected (detected via reading from socket);
+	
+	char buffer[MAX_LINE];
+	memset(buffer, 0, sizeof(buffer));
+	strncpy(buffer, word, MAX_LINE);
+	
+	int read = socket_read(fd, buffer, MAX_LINE);
+
+	if(read == -1) {
+		return -1; // client disconnected;
+	} else {
+		remove_new_line(buffer);
+		
+		if(are_words_equal(word, buffer)) {
+			return 1;
+		} 
+	}
+	
+	return 0;
 }
 
 /* clients */
@@ -272,50 +310,35 @@ int connected_clients_count() {
 	return cnt;
 }
 
-void handle_disconnected_client(game* this_game) {
-	// this_game->player disconnected;
-	
-	int i = 0;
-	int id = this_game->player->id;
-	
-	char buffer[MAX_LINE];
-	memset(buffer, 0, MAX_LINE);
-	snprintf(buffer, MAX_LINE, 
-		"# Klient [%s] odłączył się - wygrana!\n", 
-		this_game->player->nickname);
-	
-	socket_write(this_game->opponent->fd, buffer, sizeof(buffer));
-	printf("%s", buffer);
-	
-	clients[id] = NULL;
-	
-	for(i = 0; i < MAX_CLIENTS; i++) {
-		if(clients[i] != NULL) {
-			clients[i]->results[id] = EMPTY;
-		}
-	}
-					
-	pthread_cancel(this_game->opponent_thread);
-	this_game->opponent->idle = 1;
-	this_game->opponent->score++;
-	
-	send_scoreboard_client(this_game->opponent);
-}
+/* client */
 
-void init_game_for_player(game* this_game, 
+void client_game_init(client_game* this_client_game, 
 		client* player, client* opponent, 
 		pthread_mutex_t *mutex, pthread_cond_t *cond,
 		int* winner, int* indexes) {
-	this_game->indexes = indexes;
-	this_game->winner = winner;
-	this_game->player = player;
-	this_game->opponent = opponent;
+	this_client_game->indexes = indexes;
+	this_client_game->winner = winner;
+	this_client_game->player = player;
+	this_client_game->opponent = opponent;
 	
-	this_game->mutex = mutex;
-	this_game->cond = cond;
+	this_client_game->mutex = mutex;
+	this_client_game->cond = cond;
 }
 
-void handle_finished_game(client* winner, client* loser) {
+void handle_winner(client_game* this_client_game) {
+	// handle situation when this game's player is a winner
+		
+	mutex_lock(this_client_game->mutex);
+	cond_signal(this_client_game->cond);
+	*(this_client_game->winner) = this_client_game->player->id;
+	mutex_unlock(this_client_game->mutex);
+	
+	printf("# Zakończenie gry: [%s] [W] <-> [%s].\n",
+		this_client_game->player->nickname,
+		this_client_game->opponent->nickname);
+}
+
+void handle_finished_client_game(client* winner, client* loser) {
 	char buffer[MAX_LINE];
 	memset(buffer, 0, MAX_LINE);
 	
@@ -330,6 +353,40 @@ void handle_finished_game(client* winner, client* loser) {
 	clients[winner->id]->results[loser->id] = WON;
 	clients[loser->id]->results[winner->id] = LOST;
 	winner->score++;
+}
+
+void handle_disconnected_client(client_game* this_client_game) {
+	// this_client_game->player disconnected from a game.
+	
+	int i = 0;
+	int id = this_client_game->player->id;
+	
+	char buffer[MAX_LINE];
+	memset(buffer, 0, MAX_LINE);
+	snprintf(buffer, MAX_LINE, 
+		"# [Id: %d | %s] Klient odłączył się.\n", 
+		this_client_game->player->id,
+		this_client_game->player->nickname);
+	
+	socket_write(this_client_game->opponent->fd, buffer, sizeof(buffer));
+	
+	printf("# Zakończenie gry: [%s] [W] <-> [%s].\n",
+		this_client_game->opponent->nickname,
+		this_client_game->player->nickname);
+	
+	clients[id] = NULL;
+	
+	for(i = 0; i < MAX_CLIENTS; i++) {
+		if(clients[i] != NULL) {
+			clients[i]->results[id] = EMPTY;
+		}
+	}
+					
+	pthread_cancel(this_client_game->opponent_thread);
+	this_client_game->opponent->idle = 1;
+	this_client_game->opponent->score++;
+	
+	send_scoreboard_client(this_client_game->opponent);
 }
 
 /* others */

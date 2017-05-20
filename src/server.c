@@ -6,9 +6,8 @@ volatile sig_atomic_t do_work = 1;
 void sigint_handler(int sig);
 void usage(char* name);
 void build_array(char* path);
-void* user_input(void* arg);
 void find_new_games();
-void* single_game(void* arg);
+void* single_client_game(void* arg);
 void* handle_pair(void* arg);
 void* client_handler(void* arg);
 void do_server(int server_socket, int16_t port);
@@ -22,6 +21,8 @@ void usage(char* name) {
 }
 
 void build_array(char* path) {
+	// method used to build an array with words from text file
+	
 	char data[MAX_LINE];
 
 	FILE *fp;
@@ -42,6 +43,8 @@ void build_array(char* path) {
 }
 
 void find_new_games() {
+	// method used to find a new game between idle clients;
+
 	int i = 0, j = 0;
 	
 	for(; i < MAX_CLIENTS; i++) {
@@ -49,12 +52,9 @@ void find_new_games() {
 		
 		for(j = 0; j < MAX_CLIENTS; j++) {
 			if(clients[j] != NULL &&
-			clients[i]->connected == 1 &&
-			clients[j]->connected == 1 &&
-			clients[j]->results[i] == NOT_PLAYED &&
-			clients[i]->idle == 1 &&
-			clients[j]->idle == 1) {
-				// let's start game between i and j;				
+			clients[i]->connected && clients[j]->connected &&
+			clients[i]->idle && clients[j]->idle &&
+			clients[j]->results[i] == NOT_PLAYED) {				
 				clients[i]->idle = clients[j]->idle = 0;
 				clients[i]->results[j] = PLAYING;
 				clients[j]->results[i] = PLAYING;
@@ -67,101 +67,92 @@ void find_new_games() {
 				printf("# Rozpoczęcie gry: [%s] <-> [%s].\n",
 					new_pair->client1->nickname,
 					new_pair->client2->nickname);
-				create_thread(
-					&game_thread, NULL, 
-					handle_pair, new_pair);
+				
+				create_thread(&game_thread, NULL, handle_pair, new_pair);
 			}
 		}
 	}
 }
 
-void* single_game(void* arg) {
-	game* this_game = (game*)arg;
-	int* indexes = this_game->indexes;
+void client_games_init(client_game* games, pair* this_pair, 
+		pthread_t* threads, pthread_mutex_t* mutex, pthread_cond_t* cond, 
+		int* winner, int* indexes) {
+	// method used to initialize structures for a game between clients
+	// every client in a game operates on a different thread, has info
+	// about its opponent, indexes of words, and tries to set its' wi-
+	// nner (int*) value to its' id, protected by mutex and cond. var.
+			
+	client_game_init(&games[0], this_pair->client1, this_pair->client2, 
+		mutex, cond, winner, indexes);
+	client_game_init(&games[1], this_pair->client2, this_pair->client1, 
+		mutex, cond, winner, indexes);
+		
+	create_thread(&threads[0], NULL, single_client_game, &games[0]);
+	create_thread(&threads[1], NULL, single_client_game, &games[1]);
+	games[0].player_thread = threads[0];
+	games[1].player_thread = threads[1];
+	games[0].opponent_thread = threads[1];
+	games[1].opponent_thread = threads[0];
+}
+
+void* single_client_game(void* arg) {
+	// create single game for player and play with opponent
+	
+	client_game* this_client_game = (client_game*)arg;
+	int* indexes = this_client_game->indexes;
 	char buffer[MAX_LINE];
 	
-	int i = 0, timed_out = 1;
-	int retry_cnt = 0, disconnected = 0;
+	int i = 0, disconnected = 0;
+	int fd = this_client_game->player->fd;
+	char* op_nickname = this_client_game->opponent->nickname;
 	
-	int fd = this_game->player->fd;
-	int id = this_game->player->id;
+	fd_set base_rfds, rfds;
+	FD_ZERO(&base_rfds);
+	FD_SET(fd, &base_rfds);
 	
-	struct timespec timeout;
-	timeout.tv_sec = TIMEOUT_SECS;
-	timeout.tv_nsec = 0;
-	
-	fd_set base_wfds, wfds;
-	FD_ZERO(&base_wfds);
-	FD_SET(fd, &base_wfds);
-	
-	snprintf(buffer, MAX_LINE, "# Obecnie grasz z: [%s].\n",
-		this_game->opponent->nickname);
+	snprintf(buffer, MAX_LINE, "# Obecnie grasz z: [%s].\n", op_nickname);
 	socket_write(fd, buffer, MAX_LINE);
 	
 	while(i < WORDS_GAME) {	
-		wfds = base_wfds;
-		timed_out = 1;
+		rfds = base_rfds;
 		
-		memset(buffer, 0, sizeof(buffer));
-		snprintf(
-			buffer, MAX_LINE, "# [%d/%d] %s: ", 
-			i + 1, WORDS_GAME, words[indexes[i]]);
-		socket_write(fd, buffer, MAX_LINE);
+		send_word_to_client(fd, words[indexes[i]], i);
 		
-		if(pselect(fd + 1, NULL, &wfds, NULL, &timeout, NULL) > 0) {
-			timed_out = 0;
-			
-			if(FD_ISSET(fd, &wfds)) {
-				memset(buffer, 0, sizeof(buffer));
-				int read = socket_read(fd, buffer, MAX_LINE);
-
-				if(read == -1) {
-					// client disconnected;
-					disconnected = 1;
-				} else {
-					remove_new_line(buffer);
-					if(are_words_equal(words[indexes[i]], buffer)) {
-						i++;
-					} 
-				}
-			}
-		}
-		
-		if(timed_out) {
-			strncpy(buffer, "\n# Hej, jesteś tam?\n", MAX_LINE);
-			socket_write(fd, buffer, MAX_LINE);
-			
-			retry_cnt++;
-			printf("# Ponowienie połączenia [%d/%d]: [%s]\n", 
-				retry_cnt, MAX_RETRY_CNT,
-				this_game->player->nickname);
+		if(pselect(fd + 1, &rfds, NULL, NULL, NULL, NULL) > 0) {
+			if(FD_ISSET(fd, &rfds)) {
+				int ret = recv_word_from_client(fd, words[indexes[i]]);
 				
-			if(retry_cnt == MAX_RETRY_CNT) {
-				disconnected = 1;
+				if(ret > 0) {
+					i++; // word was correctly written by client;
+				} else if(ret == -1) {
+					disconnected = 1;
+				}
 			}
 		}
 				
 		if(disconnected) {
-			handle_disconnected_client(this_game);
+			handle_disconnected_client(this_client_game);
 			find_new_games();
 			return arg;
 		}
 	}
 	
-	mutex_lock(this_game->mutex);
-	cond_signal(this_game->cond);
-	*(this_game->winner) = id;
-	mutex_unlock(this_game->mutex);
-
+	handle_winner(this_client_game);
 	return arg;
 }
 
 void* handle_pair(void* arg) {
+	// thread function used to handle a game between two clients
+	// in client_game_init, 2 threads are  created for 2 clients.
+	// winner values stands  for winner's identifier, players try
+	// to set this value to their id's, prot'd by mutex and c. v.
+	// after game end, we can start looking for new games again.
+	
 	int winner = -1;
 	pair* this_pair = (pair*)arg;
 	client* cl1 = this_pair->client1;
 	client* cl2 = this_pair->client2;
-	game this_game[2];
+	client_game client_games[2];
 	pthread_t threads[2];
 	
 	pthread_mutex_t mutex;
@@ -172,25 +163,16 @@ void* handle_pair(void* arg) {
 	int* indexes = (int*)malloc(sizeof(int) * WORDS_GAME);
 	find_indexes(indexes, WORDS_GAME, WORDS_CNT);
 	
-	init_game_for_player(&this_game[0], cl1, cl2, 
+	client_games_init(client_games, this_pair, threads, 
 		&mutex, &cond, &winner, indexes);
-	init_game_for_player(&this_game[1], cl2, cl1,
-		&mutex, &cond, &winner, indexes);
-	
-	create_thread(&threads[0], NULL, single_game, &this_game[0]);
-	create_thread(&threads[1], NULL, single_game, &this_game[1]);
-	this_game[0].player_thread = threads[0];
-	this_game[1].player_thread = threads[1];
-	this_game[0].opponent_thread = threads[1];
-	this_game[1].opponent_thread = threads[0];
 	
 	pthread_cond_wait(&cond, &mutex);
 
 	if(winner == cl1->id) {
-		handle_finished_game(cl1, cl2);
+		handle_finished_client_game(cl1, cl2);
 		pthread_cancel(threads[1]);
 	} else {
-		handle_finished_game(cl2, cl1);
+		handle_finished_client_game(cl2, cl1);
 		pthread_cancel(threads[0]);
 	}
 
@@ -198,13 +180,15 @@ void* handle_pair(void* arg) {
 	clients[cl2->id]->idle = 1;
 	
 	free(indexes);
-	
-	send_scoreboard_game(this_game);
+
+	send_scoreboard_client_game(&client_games[0]);
 	find_new_games();
 	pthread_exit((void*)arg);
 }
 
 void* client_handler(void* arg) {
+	// handle client by finding a game to play for him.
+	
 	int client_socket = *((int*)arg);
 	client* cl = (client*)malloc(sizeof(client));
 	client_init(client_socket, cl);
@@ -213,7 +197,6 @@ void* client_handler(void* arg) {
 		cl->id, cl->nickname);
 	
 	find_new_games();
-	
 	pthread_exit((void*)arg);
 }
 
@@ -275,8 +258,6 @@ int main(int argc, char** argv) {
 	do_server(server_socket, port);
 	
 	safe_close(server_socket);
-	
 	fprintf(stderr, "# Serwer zakończył działanie.\n");
-
 	return EXIT_SUCCESS;
 }

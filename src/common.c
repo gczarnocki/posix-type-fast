@@ -1,6 +1,6 @@
 #include "common.h"
 
-/* Files */
+/* files */
 
 void safe_fflush(FILE* stream) {
 	if(TEMP_FAILURE_RETRY(fflush(stream)) == EOF) {
@@ -77,7 +77,7 @@ ssize_t bulk_write(int fd, char *buf, size_t count) {
     return len;
 }
 
-/* Signals */
+/* signals */
 
 void set_handler(void (*f)(int), int sigNo) {
 	struct sigaction act;
@@ -89,7 +89,7 @@ void set_handler(void (*f)(int), int sigNo) {
 	}
 }
 
-/* Sockets */
+/* sockets */
 
 int is_valid_port(uint16_t port) {
 	return port > 0 && port <= MAX_PORT;
@@ -179,7 +179,7 @@ ssize_t socket_write(int fd, char* buf, size_t count) {
 	return len;
 }
 
-/* Threads */
+/* threads */
 
 void create_thread(pthread_t *thread, const pthread_attr_t *attr, 
 		void* (*handler)(void*), void *arg) {
