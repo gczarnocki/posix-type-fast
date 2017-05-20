@@ -312,19 +312,6 @@ int connected_clients_count() {
 
 /* client */
 
-void client_game_init(client_game* this_client_game, 
-		client* player, client* opponent, 
-		pthread_mutex_t *mutex, pthread_cond_t *cond,
-		int* winner, int* indexes) {
-	this_client_game->indexes = indexes;
-	this_client_game->winner = winner;
-	this_client_game->player = player;
-	this_client_game->opponent = opponent;
-	
-	this_client_game->mutex = mutex;
-	this_client_game->cond = cond;
-}
-
 void handle_winner(client_game* this_client_game) {
 	// handle situation when this game's player is a winner
 		

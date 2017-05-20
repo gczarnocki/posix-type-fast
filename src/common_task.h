@@ -84,12 +84,7 @@ void client_init(int client_socket, client* cl);
 int find_index_for_client();
 int connected_clients_count();
 
-void client_game_init(client_game* this_game, 
-		client* player, client* opponent, 
-		pthread_mutex_t *mutex, pthread_cond_t *cond,
-		int* winner, int* indexes);
-void handle_winner(client_game* this_client_game);
-		
+void handle_winner(client_game* this_client_game);	
 void handle_finished_client_game(client* winner, client* loser);
 void handle_disconnected_client(client_game* this_client_game);
 

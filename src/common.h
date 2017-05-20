@@ -80,10 +80,11 @@ ssize_t socket_write(int fd, char* buf, size_t count);
 
 /* Threads */
 
-void create_thread(pthread_t *thread, const pthread_attr_t *attr, 
+void thread_create(pthread_t *thread, const pthread_attr_t *attr, 
 	void* (*handler)(void*), void *arg);
-void create_detached_thread(pthread_t *thread, 
+void thread_detached_create(pthread_t *thread, 
 	void* (*handler)(void*), void *arg);
+void* thread_exit(void *arg);
 
 void mutex_lock(pthread_mutex_t *mutex);
 void mutex_unlock(pthread_mutex_t *mutex);

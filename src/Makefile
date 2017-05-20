@@ -2,7 +2,7 @@ CC=gcc
 H_DEFS=common.h common_task.h
 O_DEFS=common.o common_task.o
 
-C_FLAGS=-Wall -Werror -pedantic -g
+C_FLAGS=-Wall -Werror -pedantic -g -O0
 L_FLAGS=-lrt -lpthread
 
 SERVER=server

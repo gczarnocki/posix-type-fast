@@ -181,14 +181,14 @@ ssize_t socket_write(int fd, char* buf, size_t count) {
 
 /* threads */
 
-void create_thread(pthread_t *thread, const pthread_attr_t *attr, 
+void thread_create(pthread_t *thread, const pthread_attr_t *attr, 
 		void* (*handler)(void*), void *arg) {
 	if(pthread_create(thread, attr, handler, arg) < 0) {
 		EXIT("pthread_create");
 	}
 }
 
-void create_detached_thread(pthread_t *thread, 
+void thread_detached_create(pthread_t *thread, 
 		void* (*handler)(void*), void *arg) {
 	pthread_attr_t attr;
 			
@@ -204,6 +204,11 @@ void create_detached_thread(pthread_t *thread,
 	
 	pthread_detach(*thread);
 	pthread_attr_destroy(&attr);
+}
+
+void* thread_exit(void *arg) {
+	pthread_exit(arg);
+	return arg;
 }
 
 void mutex_lock(pthread_mutex_t *mutex) {
