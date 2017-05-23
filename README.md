@@ -16,7 +16,7 @@ If client disconnects from server, e.g. `telnet` quits, especially the client st
 
 ## Additional info
 
-Code is documented in English, as well as this repository is maintained in English, although the UI is translated to Polish. There are no plans to translate it to English as this game was created as a final project for UNIX cource on Warsaw University of Technology.
+Code is documented in English, as well as this repository is maintained in English, although the UI is translated to Polish. There are no plans to translate it to English as this game was created only to be presented as a final project for UNIX course on Warsaw University of Technology.
 
 ## In-game screenshots
 
