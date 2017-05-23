@@ -47,6 +47,9 @@ int parse_arguments(int argc, char** argv, uint16_t* port) {
 }
 
 void find_indexes(int* indexes, int array_size, int max_range) {
+	// fill array of indexes  (size: array_size) with 
+	// random integers of maximum value of max_range.
+	
 	srand(time(NULL));
 	
 	int i = 0;

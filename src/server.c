@@ -7,13 +7,12 @@ void sigint_handler(int sig);
 void usage(char* name);
 void build_array(char* path);
 void find_new_games();
-void client_game_init(client_game* this_client_game, 
-		client* player, client* opponent, 
-		pthread_mutex_t *mutex, pthread_cond_t *cond,
-		int* winner, int* indexes);
+void client_game_init(client_game* this_client_game, client* player, 
+	client* opponent, pthread_mutex_t *mutex, pthread_cond_t *cond,
+	int* winner, int* indexes);
 void client_games_init(client_game* games, 
-		pair* this_pair, pthread_t* threads, pthread_mutex_t* mutex, 
-		pthread_cond_t* cond, int* winner, int* indexes);
+	pair* this_pair, pthread_t* threads, pthread_mutex_t* mutex, 
+	pthread_cond_t* cond, int* winner, int* indexes);
 void* handle_pair(void* arg);
 void* single_client_game(void* arg);
 void* client_handler(void* arg);
@@ -51,7 +50,7 @@ void build_array(char* path) {
 
 void find_new_games() {
 	// method used to find a new game between two idle clients.
-	// client must be connected and idle  and there must be a
+	// client  must be  connected and idle and there  must be a
 	// "NOT_PLAYED" enum result to start a game between them.
 
 	int i = 0, j = 0;
@@ -120,7 +119,7 @@ void client_games_init(client_game* games, pair* this_pair,
 void* handle_pair(void* arg) {
 	// thread function used to handle a game between two clients
 	// in client_game_init, 2 threads are  created for 2 clients.
-	// winner values stands  for winner's identifier, players try
+	// winner value  stands for winner's  identifier, players try
 	// to set this value to their id's, prot'd by mutex and c. v.
 	// after game end, we can start looking for new games again.
 	
