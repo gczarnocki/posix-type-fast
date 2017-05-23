@@ -50,7 +50,9 @@ Client won by opponent's disconnection:
     * sockets, especially `TCP` protocol,
     * signal handling,
     * structures, 
-    * and more.
+    * and more,
+* Makefile,
+* header files.
 
 ## Author
 
