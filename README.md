@@ -52,7 +52,7 @@ Client won by opponent's disconnection:
     * structures, 
     * and more.
 
-## Disclaimer
+## Author
 
 Created by: Grzegorz Czarnocki  
 Warsaw University of Technology  
