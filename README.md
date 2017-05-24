@@ -2,7 +2,7 @@
 
 ## Short description
 
-POSIX-compliant game _posix-type-fast_ is a simple game based on server-client architecture using `pthreads` and `TCP` protocol. Server handles connections and disconnections from many players, finds new games and send the results to players. This game is written to achieve as broad compliance with POSIX standards as possible. 
+POSIX-compliant game _posix-type-fast_ is a simple game based on server-client architecture using `pthreads` and `TCP` protocol. Server handles connections and disconnections from many players, finds new games and sends the results to players. This game is written to achieve as broad compliance with POSIX standards as possible. 
 
 The aim of this game is to type words presented by server faster than the opponent. No indicator is presented whether opponent is faster or not so do your best! Use `telnet` to connect to server and play. Port is one of arguments to `server` application, e.g. `./server 2000 input_file.txt`.
 
@@ -12,7 +12,7 @@ All the parameters, e.g. `WORDS_GAME` - count of words to rewrite during a singl
 
 The path to input file is a second argument to `server` application. Provide `server` with any file you like but check if every word is in a separate line. The number of words being used in program is also a parameter in program, called `WORDS_CNT`.
 
-If client disconnects from server, e.g. `telnet` quits, especially the client starts any game, this client may be visible in ranking but the disconnection will be detected after pairing with an opponent - and opponent wins automatically. Disconnection _during the game_ is detected instantaneously. No timeouts are imposed.
+If client disconnects from server, e.g. `telnet` quits, especially before it starts any game, this client may be visible in ranking but the disconnection will be detected after pairing with an opponent - and opponent wins automatically. Disconnection _during the game_ is detected instantaneously. No timeouts are imposed.
 
 ## Additional info
 
